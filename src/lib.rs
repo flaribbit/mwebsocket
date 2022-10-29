@@ -24,6 +24,7 @@ impl Client {
         let socket = Arc::new(Mutex::new(Some(socket)));
         let messages = self.messages.clone();
         self.socket = socket.clone();
+        messages.lock().unwrap().push_back("$open".to_string());
         std::thread::spawn(move || loop {
             if let Some(socket) = socket.lock().unwrap().as_mut() {
                 if let Ok(msg) = socket.read_message() {
@@ -34,6 +35,9 @@ impl Client {
                         Message::Binary(_) => {}
                         _ => {}
                     }
+                } else {
+                    messages.lock().unwrap().push_back("$close".to_string());
+                    break;
                 }
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
