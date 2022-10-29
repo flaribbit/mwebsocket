@@ -81,7 +81,7 @@ fn sleep(_: &Lua, time: f64) -> LuaResult<()> {
 }
 
 #[mlua::lua_module]
-fn my_module(lua: &Lua) -> LuaResult<LuaTable> {
+fn mwebsocket(lua: &Lua) -> LuaResult<LuaTable> {
     let exports = lua.create_table()?;
     exports.set("newClient", lua.create_function(new_client)?)?;
     exports.set("sleep", lua.create_function(sleep)?)?;
@@ -97,7 +97,7 @@ mod tests {
     #[test]
     fn simple_test() -> LuaResult<()> {
         let lua = Lua::new();
-        lua.globals().set("lib", my_module(&lua)?)?;
+        lua.globals().set("lib", mwebsocket(&lua)?)?;
         lua.load(
             r#"
             local client = lib.newClient()
