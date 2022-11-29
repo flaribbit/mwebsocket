@@ -27,14 +27,14 @@ impl Client {
         std::thread::spawn(move || {
             let res = connect(Url::parse(&url).unwrap());
             if res.is_err() {
-                push_event(&messages, "close: unable to connect");
+                push_event(&messages, "close: Unable to connect");
                 return;
             }
             *socket.lock().unwrap() = Some(res.unwrap().0);
             push_event(&messages, "open");
             loop {
                 if let Some(socket) = socket.lock().unwrap().as_mut() {
-                    let close = ckeck_message(messages.lock().unwrap(), socket.read_message());
+                    let close = ckeck_message(&messages, socket.read_message());
                     if close {
                         break;
                     }
@@ -68,23 +68,23 @@ fn push_event(messages: &Arc<Mutex<VecDeque<String>>>, event: &str) {
 }
 
 fn ckeck_message(
-    mut messages: std::sync::MutexGuard<VecDeque<String>>,
+    messages: &Arc<Mutex<VecDeque<String>>>,
     incoming: tungstenite::Result<Message>,
 ) -> bool {
     match incoming {
         Ok(message) => {
             if let Message::Text(text) = message {
-                messages.push_back(text);
+                messages.lock().unwrap().push_back(text);
             }
             false
         }
         Err(tungstenite::Error::AlreadyClosed) => {
-            messages.push_back(EVENT_PREFIX.to_string() + "error: Connection already closed");
+            push_event(&messages, "error: Connection already closed");
             true
         }
         Err(tungstenite::Error::ConnectionClosed) => true,
         Err(error) => {
-            messages.push_back(EVENT_PREFIX.to_string() + "error: " + &error.to_string());
+            push_event(&messages, &format!("error: {error}"));
             false
         }
     }
@@ -121,8 +121,8 @@ fn mwebsocket(lua: &Lua) -> LuaResult<LuaTable> {
     let exports = lua.create_table()?;
     exports.set("newClient", lua.create_function(new_client)?)?;
     exports.set("sleep", lua.create_function(sleep)?)?;
-    exports.set("json_parse", lua.create_function(json_parse)?)?;
-    exports.set("json_stringify", lua.create_function(json_stringify)?)?;
+    exports.set("jsonParse", lua.create_function(json_parse)?)?;
+    exports.set("jsonStringify", lua.create_function(json_stringify)?)?;
     Ok(exports)
 }
 

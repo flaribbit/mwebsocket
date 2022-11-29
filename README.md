@@ -8,8 +8,8 @@ Learning multithreading with Rust. By the way, I wrote this library for love2d, 
 - `Client:poll() -> string?`
 - `Client:send(text: string)`
 - `Client:close()`
-- `json_parse(value: string) -> table`
-- `json_stringify(value: table) -> string`
+- `jsonParse(value: string) -> table`
+- `jsonStringify(value: table) -> string`
 
 ## Example
 ```bash
