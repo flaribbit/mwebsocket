@@ -1,0 +1,8 @@
+{
+    "rust-analyzer.server.extraEnv": {
+        "PKG_CONFIG_PATH": "${workspaceFolder}/luajit"
+    },
+    "terminal.integrated.env.windows": {
+        "PKG_CONFIG_PATH": "${workspaceFolder}/luajit"
+    },
+}
