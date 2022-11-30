@@ -34,7 +34,7 @@ impl Client {
             push_event(&messages, "open");
             loop {
                 if let Some(socket) = socket.lock().unwrap().as_mut() {
-                    let close = ckeck_message(&messages, socket.read_message());
+                    let close = check_message(&messages, socket.read_message());
                     if close {
                         break;
                     }
@@ -67,7 +67,7 @@ fn push_event(messages: &Arc<Mutex<VecDeque<String>>>, event: &str) {
         .push_back(EVENT_PREFIX.to_string() + event);
 }
 
-fn ckeck_message(
+fn check_message(
     messages: &Arc<Mutex<VecDeque<String>>>,
     incoming: tungstenite::Result<Message>,
 ) -> bool {
