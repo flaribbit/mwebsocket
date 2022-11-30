@@ -12,10 +12,7 @@ Learning multithreading with Rust. By the way, I wrote this library for love2d, 
 - `jsonStringify(value: table) -> string`
 
 ## Example
-```bash
-cd test
-lovec .
-```
+For the full example for love2d, see [test/main.lua](test/main.lua).
 
 ## Dependencies
 - pkg-config
