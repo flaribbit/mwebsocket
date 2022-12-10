@@ -5,7 +5,6 @@ use std::net::TcpStream;
 use std::sync::{Arc, Mutex};
 use tungstenite::{connect, Message};
 use tungstenite::{protocol::WebSocket, stream::MaybeTlsStream};
-use url::Url;
 
 struct Client {
     messages: Arc<Mutex<VecDeque<String>>>,
@@ -25,7 +24,7 @@ impl Client {
         let socket = self.socket.clone();
         let messages = self.messages.clone();
         std::thread::spawn(move || {
-            let res = connect(Url::parse(&url).unwrap());
+            let res = connect(url);
             if res.is_err() {
                 push_event(&messages, "close: Unable to connect");
                 return;
@@ -58,6 +57,33 @@ impl Client {
     fn poll(&mut self) -> Option<String> {
         self.messages.lock().unwrap().pop_front()
     }
+}
+
+fn connect_with_headers(
+    url: String,
+    headers: Vec<[String; 2]>,
+) -> Result<
+    (
+        WebSocket<MaybeTlsStream<TcpStream>>,
+        tungstenite::handshake::client::Response,
+    ),
+    tungstenite::Error,
+> {
+    let uri: http::Uri = url.parse().unwrap();
+    let key = tungstenite::handshake::client::generate_key();
+    let request = http::Request::builder()
+        .uri(url)
+        .header("Host", uri.host().unwrap())
+        .header("Connection", "Upgrade")
+        .header("Upgrade", "websocket")
+        .header("Sec-WebSocket-Version", "13")
+        .header("Sec-WebSocket-Key", key);
+    let request = headers
+        .iter()
+        .fold(request, |req, [k, v]| req.header(k, v))
+        .body(())
+        .unwrap();
+    connect(request)
 }
 
 fn push_event(messages: &Arc<Mutex<VecDeque<String>>>, event: &str) {

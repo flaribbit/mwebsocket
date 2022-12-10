@@ -9,6 +9,7 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
+http = "0.2.8"
 mlua = { version = "0.8", features = ["luajit", "module", "serialize"] }
 serde_json = "1.0.87"
 tungstenite = "0.17.3"
