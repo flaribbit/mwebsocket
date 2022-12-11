@@ -20,16 +20,22 @@ impl Client {
             socket: Arc::new(Mutex::new(None)),
         }
     }
-    fn connect(&mut self, url: String) {
+    fn connect(&mut self, url: String, headers: Option<Vec<[String; 2]>>) {
         let socket = self.socket.clone();
         let messages = self.messages.clone();
         std::thread::spawn(move || {
-            let res = connect(url);
-            if res.is_err() {
-                push_event(&messages, "close: Unable to connect");
-                return;
+            let res = match headers {
+                Some(headers) => connect_with_headers(url, headers),
+                None => connect(url),
+            };
+            match res {
+                Ok((s, _)) => *socket.lock().unwrap() = Some(s),
+                Err(e) => {
+                    push_event(&messages, &format!("error: {e}"));
+                    push_event(&messages, "close");
+                    return;
+                }
             }
-            *socket.lock().unwrap() = Some(res.unwrap().0);
             push_event(&messages, "open");
             loop {
                 if let Some(socket) = socket.lock().unwrap().as_mut() {
@@ -105,12 +111,12 @@ fn check_message(
             false
         }
         Err(tungstenite::Error::AlreadyClosed) => {
-            push_event(&messages, "error: Connection already closed");
+            push_event(messages, "error: Connection already closed");
             true
         }
         Err(tungstenite::Error::ConnectionClosed) => true,
         Err(error) => {
-            push_event(&messages, &format!("error: {error}"));
+            push_event(messages, &format!("error: {error}"));
             false
         }
     }
@@ -119,9 +125,18 @@ fn check_message(
 impl LuaUserData for Client {
     fn add_methods<'lua, M: LuaUserDataMethods<'lua, Self>>(methods: &mut M) {
         methods.add_method_mut("poll", |_, this, ()| Ok(this.poll()));
-        methods.add_method_mut("connect", |_, this, url: String| Ok(this.connect(url)));
-        methods.add_method_mut("send", |_, this, text: String| Ok(this.send(text)));
-        methods.add_method_mut("close", |_, this, ()| Ok(this.close()));
+        methods.add_method_mut("connect", |_, this, (url, headers)| {
+            this.connect(url, headers);
+            Ok(())
+        });
+        methods.add_method_mut("send", |_, this, text: String| {
+            this.send(text);
+            Ok(())
+        });
+        methods.add_method_mut("close", |_, this, ()| {
+            this.close();
+            Ok(())
+        });
     }
 }
 
