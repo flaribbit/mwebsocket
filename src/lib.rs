@@ -1,6 +1,5 @@
 use mlua::prelude::*;
-use mlua::LuaSerdeExt;
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::net::TcpStream;
 use std::sync::{Arc, Mutex};
 use tungstenite::{connect, Message};
@@ -9,6 +8,16 @@ use tungstenite::{protocol::WebSocket, stream::MaybeTlsStream};
 struct Client {
     messages: Arc<Mutex<VecDeque<String>>>,
     socket: Arc<Mutex<Option<WebSocket<MaybeTlsStream<TcpStream>>>>>,
+}
+
+struct HttpResponse {
+    status: i32,
+    headers: BTreeMap<String, String>,
+    body: String,
+}
+
+struct Promise {
+    data: Arc<Mutex<Option<HttpResponse>>>,
 }
 
 const EVENT_PREFIX: &str = "@";
@@ -122,6 +131,34 @@ fn check_message(
     }
 }
 
+fn http_get(_: &Lua, (url, headers): (String, Option<Vec<[String; 2]>>)) -> LuaResult<Promise> {
+    let res = Promise {
+        data: Arc::new(Mutex::new(None)),
+    };
+    let request = match headers {
+        Some(headers) => headers
+            .iter()
+            .fold(ureq::get(&url), |r, [k, v]| r.set(k, v)),
+        None => ureq::get(&url),
+    };
+    let pdata = res.data.clone();
+    std::thread::spawn(move || {
+        let response = request.call().unwrap();
+        pdata.lock().unwrap().replace(HttpResponse {
+            status: response.status() as i32,
+            headers: [].into(),
+            body: "".into(),
+        });
+    });
+    Ok(res)
+}
+
+impl Promise {
+    fn poll(&mut self) -> Option<HttpResponse> {
+        self.data.lock().unwrap().take()
+    }
+}
+
 impl LuaUserData for Client {
     fn add_methods<'lua, M: LuaUserDataMethods<'lua, Self>>(methods: &mut M) {
         methods.add_method_mut("poll", |_, this, ()| Ok(this.poll()));
@@ -136,6 +173,22 @@ impl LuaUserData for Client {
         methods.add_method_mut("close", |_, this, ()| {
             this.close();
             Ok(())
+        });
+    }
+}
+
+impl LuaUserData for Promise {
+    fn add_methods<'lua, M: LuaUserDataMethods<'lua, Self>>(methods: &mut M) {
+        methods.add_method_mut("poll", |lua, this, ()| {
+            if let Some(response) = this.poll() {
+                let mut ret = LuaMultiValue::new();
+                ret.push_front(response.body.to_lua(lua).unwrap());
+                ret.push_front(response.status.to_lua(lua).unwrap());
+                ret.push_front(response.headers.to_lua(lua).unwrap());
+                Ok(ret)
+            } else {
+                Ok(LuaMultiValue::new())
+            }
         });
     }
 }
@@ -164,6 +217,7 @@ fn mwebsocket(lua: &Lua) -> LuaResult<LuaTable> {
     exports.set("sleep", lua.create_function(sleep)?)?;
     exports.set("jsonParse", lua.create_function(json_parse)?)?;
     exports.set("jsonStringify", lua.create_function(json_stringify)?)?;
+    exports.set("get", lua.create_function(http_get)?)?;
     Ok(exports)
 }
 
