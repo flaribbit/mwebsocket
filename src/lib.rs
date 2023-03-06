@@ -1,12 +1,14 @@
 use mlua::prelude::*;
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
 use std::net::TcpStream;
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use tungstenite::{connect, Message};
 use tungstenite::{protocol::WebSocket, stream::MaybeTlsStream};
 
 struct Client {
-    messages: Arc<Mutex<VecDeque<String>>>,
+    tx: Sender<String>,
+    messages: Receiver<String>,
     socket: Arc<Mutex<Option<WebSocket<MaybeTlsStream<TcpStream>>>>>,
 }
 
@@ -24,14 +26,16 @@ const EVENT_PREFIX: &str = "@";
 
 impl Client {
     fn new() -> Self {
+        let (tx, rx) = channel::<String>();
         Self {
-            messages: Arc::new(Mutex::new(VecDeque::new())),
+            tx,
+            messages: rx,
             socket: Arc::new(Mutex::new(None)),
         }
     }
     fn connect(&mut self, url: String, headers: Option<Vec<[String; 2]>>) {
         let socket = self.socket.clone();
-        let messages = self.messages.clone();
+        let tx = self.tx.clone();
         std::thread::spawn(move || {
             let res = match headers {
                 Some(headers) => connect_with_headers(url, headers),
@@ -40,15 +44,15 @@ impl Client {
             match res {
                 Ok((s, _)) => *socket.lock().unwrap() = Some(s),
                 Err(e) => {
-                    push_event(&messages, &format!("error: {e}"));
-                    push_event(&messages, "close");
+                    push_event(&tx, &format!("error: {e}"));
+                    push_event(&tx, "close");
                     return;
                 }
             }
-            push_event(&messages, "open");
+            push_event(&tx, "open");
             loop {
                 if let Some(socket) = socket.lock().unwrap().as_mut() {
-                    let close = check_message(&messages, socket.read_message());
+                    let close = check_message(&tx, socket.read_message());
                     if close {
                         break;
                     }
@@ -56,7 +60,7 @@ impl Client {
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
             *socket.lock().unwrap() = None;
-            push_event(&messages, "close");
+            push_event(&tx, "close");
         });
     }
     fn send(&mut self, text: String) {
@@ -70,7 +74,7 @@ impl Client {
         }
     }
     fn poll(&mut self) -> Option<String> {
-        self.messages.lock().unwrap().pop_front()
+        self.messages.try_recv().ok()
     }
 }
 
@@ -101,31 +105,25 @@ fn connect_with_headers(
     connect(request)
 }
 
-fn push_event(messages: &Arc<Mutex<VecDeque<String>>>, event: &str) {
-    messages
-        .lock()
-        .unwrap()
-        .push_back(EVENT_PREFIX.to_string() + event);
+fn push_event(tx: &Sender<String>, event: &str) {
+    tx.send(EVENT_PREFIX.to_string() + event).unwrap();
 }
 
-fn check_message(
-    messages: &Arc<Mutex<VecDeque<String>>>,
-    incoming: tungstenite::Result<Message>,
-) -> bool {
+fn check_message(tx: &Sender<String>, incoming: tungstenite::Result<Message>) -> bool {
     match incoming {
         Ok(message) => {
             if let Message::Text(text) = message {
-                messages.lock().unwrap().push_back(text);
+                tx.send(text).unwrap();
             }
             false
         }
         Err(tungstenite::Error::AlreadyClosed) => {
-            push_event(messages, "error: Connection already closed");
+            push_event(tx, "error: Connection already closed");
             true
         }
         Err(tungstenite::Error::ConnectionClosed) => true,
         Err(error) => {
-            push_event(messages, &format!("error: {error}"));
+            push_event(tx, &format!("error: {error}"));
             false
         }
     }
