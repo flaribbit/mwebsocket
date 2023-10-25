@@ -180,9 +180,9 @@ impl LuaUserData for Promise {
         methods.add_method_mut("poll", |lua, this, ()| {
             if let Some(response) = this.poll() {
                 let mut ret = LuaMultiValue::new();
-                ret.push_front(response.body.to_lua(lua).unwrap());
-                ret.push_front(response.status.to_lua(lua).unwrap());
-                ret.push_front(response.headers.to_lua(lua).unwrap());
+                ret.push_front(lua.to_value(&response.body)?);
+                ret.push_front(lua.to_value(&response.status)?);
+                ret.push_front(lua.to_value(&response.headers)?);
                 Ok(ret)
             } else {
                 Ok(LuaMultiValue::new())
