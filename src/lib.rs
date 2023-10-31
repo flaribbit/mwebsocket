@@ -1,6 +1,5 @@
-#![warn(clippy::unwrap_used)]
 use mlua::prelude::*;
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::net::TcpStream;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
@@ -15,23 +14,12 @@ struct Client {
 
 struct HttpResponse {
     status: i32,
-    headers: BTreeMap<String, String>,
+    headers: HashMap<String, String>,
     body: String,
 }
 
 struct Promise {
     data: Arc<Mutex<Option<HttpResponse>>>,
-}
-
-trait LockUnwrap<T> {
-    fn lock_unwrap(&self) -> std::sync::MutexGuard<T>;
-}
-
-impl<T> LockUnwrap<T> for Arc<Mutex<T>> {
-    fn lock_unwrap(&self) -> std::sync::MutexGuard<T> {
-        #[allow(clippy::unwrap_used)]
-        self.lock().unwrap()
-    }
 }
 
 const EVENT_PREFIX: &str = "@";
@@ -54,7 +42,7 @@ impl Client {
                 None => connect(url),
             };
             match res {
-                Ok((s, _)) => *socket.lock_unwrap() = Some(s),
+                Ok((s, _)) => *socket.lock().unwrap() = Some(s),
                 Err(e) => {
                     push_error(&tx, &e.to_string());
                     push_event(&tx, "close");
@@ -63,7 +51,7 @@ impl Client {
             }
             push_event(&tx, "open");
             loop {
-                if let Some(socket) = socket.lock_unwrap().as_mut() {
+                if let Some(socket) = socket.lock().unwrap().as_mut() {
                     let close = check_message(&tx, socket.read());
                     if close {
                         break;
@@ -71,19 +59,19 @@ impl Client {
                 }
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
-            *socket.lock_unwrap() = None;
+            *socket.lock().unwrap() = None;
             push_event(&tx, "close");
         });
     }
     fn send(&mut self, text: String) {
-        if let Some(socket) = self.socket.lock_unwrap().as_mut() {
+        if let Some(socket) = self.socket.lock().unwrap().as_mut() {
             if let Err(e) = socket.write(Message::Text(text)) {
                 push_error(&self.tx, &e.to_string());
             }
         }
     }
     fn close(&mut self) {
-        if let Some(socket) = self.socket.lock_unwrap().as_mut() {
+        if let Some(socket) = self.socket.lock().unwrap().as_mut() {
             if let Err(e) = socket.close(None) {
                 push_error(&self.tx, &e.to_string());
             }
@@ -160,16 +148,16 @@ fn http_get(_: &Lua, (url, headers): (String, Option<Vec<[String; 2]>>)) -> LuaR
     let request = match headers {
         Some(headers) => headers
             .iter()
-            .fold(ureq::get(&url), |r, [k, v]| r.set(k, v)),
-        None => ureq::get(&url),
+            .fold(minreq::get(&url), |r, [k, v]| r.with_header(k, v)),
+        None => minreq::get(&url),
     };
     let pdata = res.data.clone();
     std::thread::spawn(move || {
-        let response = request.call().unwrap();
-        pdata.lock_unwrap().replace(HttpResponse {
-            status: response.status() as i32,
-            headers: [].into(),
-            body: "".into(),
+        let response = request.send().unwrap();
+        pdata.lock().unwrap().replace(HttpResponse {
+            status: response.status_code,
+            headers: response.headers.clone(),
+            body: unsafe { String::from_utf8_unchecked(response.as_bytes().to_vec()) },
         });
     });
     Ok(res)
@@ -177,7 +165,7 @@ fn http_get(_: &Lua, (url, headers): (String, Option<Vec<[String; 2]>>)) -> LuaR
 
 impl Promise {
     fn poll(&mut self) -> Option<HttpResponse> {
-        self.data.lock_unwrap().take()
+        self.data.lock().unwrap().take()
     }
 }
 
